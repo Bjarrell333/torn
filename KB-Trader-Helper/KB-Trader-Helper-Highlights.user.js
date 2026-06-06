@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         KB's Trader Helper Highlights
 // @namespace    https://greasyfork.org/en/scripts/568701-kb-s-trader-helper-highlights
-// @version      8.3.1
+// @version      8.3.2
 // @description  Highlights bazaar/market/shop items for trading profit. NPC shops buy/sell analysis, per-item rules, draggable HUD.
 // @author       torn-local
 // @match        https://www.torn.com/*
@@ -330,6 +330,9 @@
 
     var hud = document.createElement('div');
     hud.id = 'tsv6-hud';
+    hud.style.display = 'flex';
+    hud.style.visibility = 'visible';
+    hud.style.opacity = '1';
 
     var btn = document.createElement('button');
     btn.id = 'tsv6-hud-btn';
@@ -359,12 +362,16 @@
     hud.appendChild(minBtn);
     body.appendChild(hud);
 
-    // Restore saved position
+    // Restore saved position, but clamp it to the current viewport.
+    // This prevents the HUD from being permanently hidden off-screen after resize/device changes.
     try {
       var pos = JSON.parse(sGet(HUD_POS_STORE) || 'null');
       if (pos && typeof pos.top === 'number' && typeof pos.left === 'number') {
-        hud.style.top   = pos.top  + 'px';
-        hud.style.left  = pos.left + 'px';
+        var safeLeft = Math.max(0, Math.min(window.innerWidth - 80, pos.left));
+        var safeTop  = Math.max(0, Math.min(window.innerHeight - 50, pos.top));
+    
+        hud.style.top   = safeTop + 'px';
+        hud.style.left  = safeLeft + 'px';
         hud.style.right = 'auto';
       }
     } catch(e) {}
@@ -413,7 +420,37 @@
       if (ind2) ind2.style.display = 'none';
     }
   }
-
+    function resetAndShowHud(openSettings) {
+      sDel(HUD_POS_STORE);
+      sDel(HUD_MIN_STORE);
+      sDel(HUD_VIS_STORE);
+  
+      hudVisible = true;
+      hudMin = false;
+  
+      var oldHud = document.getElementById('tsv6-hud');
+      if (oldHud) oldHud.remove();
+  
+      closeMenu();
+      buildHud();
+  
+      var hud = document.getElementById('tsv6-hud');
+      if (hud) {
+        hud.style.top = '60px';
+        hud.style.right = '12px';
+        hud.style.left = 'auto';
+        hud.style.bottom = 'auto';
+        hud.style.display = 'flex';
+        hud.style.visibility = 'visible';
+        hud.style.opacity = '1';
+      }
+  
+      applyHudMinState();
+  
+      if (openSettings) {
+        openMenu();
+      }
+    }
   function updateHudCounts(counts) {
     var el = document.getElementById('tsv6-hud-counts');
     if (!el) return;
@@ -427,12 +464,12 @@
     if (total === 0) { el.textContent = ''; return; }
 
     var parts = [];
-    if (counts.green  > 0) parts.push('\u25CF' + counts.green);
-    if (counts.yellow > 0) parts.push('\u25CB' + counts.yellow);
-    if (counts.blue   > 0) parts.push('\u25CF' + counts.blue);
-    if (counts.orange > 0) parts.push('\u25CF' + counts.orange);
-    if (counts.purple > 0) parts.push('\u25CF' + counts.purple);
-    if (counts.red    > 0) parts.push('\u25CF' + counts.red);
+    for (var i = 0; i < COLOR_KEYS.length; i++) {
+      var colorKey = COLOR_KEYS[i];
+      if (counts[colorKey] > 0) {
+        parts.push('\u25CF' + counts[colorKey]);
+      }
+    }
     el.textContent = parts.join(' ');
   }
 
@@ -1324,18 +1361,38 @@
   //  DESKTOP TAMPERMONKEY MENU
   // ═══════════════════════════════════════════════════════════════════════════
 
-  if (!isOnPDA) {
-    try {
-      GM_registerMenuCommand('TSV: Set API key', function() {
-        var k = prompt('Torn PUBLIC API key:', getKey());
-        if (!k || !k.trim()) return;
-        sSet(DESKKEY_STORE, k.trim()); sDel(CACHE_STORE); ready = false; load().then(scan);
-      });
-      GM_registerMenuCommand('TSV: Clear cache + re-fetch', function() {
-        sDel(CACHE_STORE); ready = false; load().then(scan);
-      });
-    } catch(e) {}
-  }
+    if (!isOnPDA) {
+      try {
+        GM_registerMenuCommand('TSV: Set API key', function() {
+          var k = prompt('Torn PUBLIC API key:', getKey());
+          if (!k || !k.trim()) return;
+          sSet(DESKKEY_STORE, k.trim());
+          sDel(CACHE_STORE);
+          ready = false;
+          load().then(function() {
+            if (window.location.href.indexOf('shops.php') !== -1) scanShop();
+            else scan();
+          });
+        });
+  
+        GM_registerMenuCommand('TSV: Clear cache + re-fetch', function() {
+          sDel(CACHE_STORE);
+          ready = false;
+          load().then(function() {
+            if (window.location.href.indexOf('shops.php') !== -1) scanShop();
+            else scan();
+          });
+        });
+  
+        GM_registerMenuCommand('TSV: Reset/show HUD', function() {
+          resetAndShowHud(false);
+        });
+  
+        GM_registerMenuCommand('TSV: Open settings', function() {
+          resetAndShowHud(true);
+        });
+      } catch(e) {}
+    }
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  SCAN
@@ -1716,8 +1773,14 @@
     loadRules();
     injectStyles();
     buildHud();
-    observer.observe(document.documentElement, { childList: true, subtree: true });
 
+    setTimeout(function() {
+      if (!document.getElementById('tsv6-hud')) {
+        resetAndShowHud(false);
+      }
+    }, 1000);
+
+    observer.observe(document.documentElement, { childList: true, subtree: true });
     var isShop = window.location.href.indexOf('shops.php') !== -1;
     load().then(isShop ? scanShop : scan);
   }
