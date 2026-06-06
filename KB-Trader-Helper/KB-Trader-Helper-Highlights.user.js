@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         KB's Trader Helper Highlights
 // @namespace    https://greasyfork.org/scripts/kb-torn-under-sell-value
-// @version      8.2.1
+// @version      8.3.1
 // @description  Highlights bazaar/market/shop items for trading profit. NPC shops buy/sell analysis, per-item rules, draggable HUD.
 // @author       torn-local
 // @match        https://www.torn.com/*
@@ -37,6 +37,7 @@
   var DESKKEY_STORE  = 'torn_sv6_key';
   var HUD_POS_STORE  = 'torn_sv6_hud_pos';
   var HUD_VIS_STORE  = 'torn_sv6_hud_vis';
+  var HUD_MIN_STORE  = 'torn_sv6_hud_min';
   var SETTINGS_STORE = 'torn_sv6_settings';
   var RULES_STORE    = 'torn_sv6_rules';
   var CACHE_TTL      = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -68,14 +69,17 @@
 
   // Color definitions
   var COLORS = {
-    green:  { bg: 'rgba(0,190,70,0.22)',   outline: 'rgba(0,190,70,0.9)',   badge: 'rgba(0,140,50,0.93)'   },
-    yellow: { bg: 'rgba(230,190,0,0.18)',  outline: 'rgba(230,190,0,0.85)', badge: 'rgba(160,120,0,0.93)'  },
-    blue:   { bg: 'rgba(30,130,255,0.2)',  outline: 'rgba(30,130,255,0.9)', badge: 'rgba(15,90,200,0.93)'  },
-    orange: { bg: 'rgba(240,110,0,0.2)',   outline: 'rgba(240,110,0,0.9)',  badge: 'rgba(180,75,0,0.93)'   },
-    purple: { bg: 'rgba(160,50,255,0.2)',  outline: 'rgba(160,50,255,0.9)', badge: 'rgba(110,25,200,0.93)' },
-    red:    { bg: 'rgba(240,40,40,0.2)',   outline: 'rgba(240,40,40,0.9)',  badge: 'rgba(180,15,15,0.93)'  }
+    green:  { bg: 'rgba(0,190,70,0.22)',    outline: 'rgba(0,190,70,0.9)',    badge: 'rgba(0,140,50,0.93)'    },
+    yellow: { bg: 'rgba(230,190,0,0.18)',   outline: 'rgba(230,190,0,0.85)',  badge: 'rgba(160,120,0,0.93)'   },
+    blue:   { bg: 'rgba(30,130,255,0.2)',   outline: 'rgba(30,130,255,0.9)',  badge: 'rgba(15,90,200,0.93)'   },
+    orange: { bg: 'rgba(240,110,0,0.2)',    outline: 'rgba(240,110,0,0.9)',   badge: 'rgba(180,75,0,0.93)'    },
+    purple: { bg: 'rgba(160,50,255,0.2)',   outline: 'rgba(160,50,255,0.9)',  badge: 'rgba(110,25,200,0.93)'  },
+    red:    { bg: 'rgba(240,40,40,0.2)',    outline: 'rgba(240,40,40,0.9)',   badge: 'rgba(180,15,15,0.93)'   },
+    pink:   { bg: 'rgba(255,80,180,0.2)',   outline: 'rgba(255,80,180,0.9)',  badge: 'rgba(200,30,140,0.93)'  },
+    teal:   { bg: 'rgba(0,200,190,0.2)',    outline: 'rgba(0,200,190,0.9)',   badge: 'rgba(0,145,140,0.93)'   },
+    white:  { bg: 'rgba(240,240,240,0.18)', outline: 'rgba(200,200,200,0.9)', badge: 'rgba(100,100,100,0.93)' }
   };
-  var COLOR_KEYS = ['green','blue','orange','purple','red','yellow'];
+  var COLOR_KEYS = ['green','blue','orange','purple','red','yellow','pink','teal','white'];
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  STATE
@@ -87,6 +91,7 @@
   var settings   = {};
   var itemRules  = {};  // { "itemId|name": [ {type,threshold,label,color}, ... ] }
   var hudVisible = true;
+  var hudMin     = false;
   var menuOpen   = false;
   var scanTimer  = null;
   var loading    = false; // prevents concurrent API calls
@@ -258,6 +263,14 @@
     );
     css.push('#tsv6-hud-btn:hover{background:rgba(255,255,255,0.28);}');
     css.push('#tsv6-hud-counts{font:bold 11px sans-serif;}');
+    css.push(
+      '#tsv6-hud-min{' +
+      'background:rgba(255,255,255,0.08);border:none;color:#888;' +
+      'font:bold 14px sans-serif;border-radius:4px;' +
+      'padding:0 5px;cursor:pointer;line-height:1;min-width:18px;min-height:22px;' +
+      '}'
+    );
+    css.push('#tsv6-hud-min:hover{color:#fff;background:rgba(255,255,255,0.2);}');
 
     // HUD menu panel
     css.push(
@@ -289,6 +302,10 @@
     css.push('.tsv-shop-buy{background:rgba(0,190,70,0.15) !important;outline:2px solid rgba(0,190,70,0.7) !important;}');
     css.push('.tsv-shop-sell-warn{background:rgba(240,40,40,0.13) !important;outline:2px solid rgba(240,40,40,0.65) !important;}');
     css.push('.tsv-shop-sell-ok{background:rgba(0,190,70,0.13) !important;outline:2px solid rgba(0,190,70,0.6) !important;}');
+    // Per-item shop colour overrides
+    css.push('.tsv-shop-sell-green{background:rgba(0,190,70,0.13) !important;outline:2px solid rgba(0,190,70,0.6) !important;}');
+    css.push('.tsv-shop-sell-yellow{background:rgba(230,190,0,0.13) !important;outline:2px solid rgba(230,190,0,0.65) !important;}');
+    css.push('.tsv-shop-sell-red{background:rgba(240,40,40,0.13) !important;outline:2px solid rgba(240,40,40,0.65) !important;}');
     // Shop badge — inline next to item name
     css.push('.tsv-shop-badge{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:3px;font:bold 10px sans-serif;color:#fff;vertical-align:middle;cursor:default;}');
     css.push('.tsv-shop-badge-green{background:rgba(0,140,50,0.9);}');
@@ -326,8 +343,20 @@
     var counts = document.createElement('span');
     counts.id = 'tsv6-hud-counts';
 
+    var minBtn = document.createElement('button');
+    minBtn.id = 'tsv6-hud-min';
+    minBtn.textContent = '−'; // −
+    minBtn.title = 'Minimise HUD';
+    minBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      hudMin = !hudMin;
+      sSet(HUD_MIN_STORE, hudMin ? '1' : '0');
+      applyHudMinState();
+    });
+
     hud.appendChild(btn);
     hud.appendChild(counts);
+    hud.appendChild(minBtn);
     body.appendChild(hud);
 
     // Restore saved position
@@ -340,16 +369,56 @@
       }
     } catch(e) {}
 
-    // Restore visibility preference
+    // Restore visibility / minimised preference
     if (sGet(HUD_VIS_STORE) === '0') hudVisible = false;
+    if (sGet(HUD_MIN_STORE) === '1') hudMin = true;
 
     makeDraggable(hud);
+    applyHudMinState();
+  }
+
+  function applyHudMinState() {
+    var hud    = document.getElementById('tsv6-hud');
+    var btn    = document.getElementById('tsv6-hud-btn');
+    var counts = document.getElementById('tsv6-hud-counts');
+    var minBtn = document.getElementById('tsv6-hud-min');
+    if (!hud) return;
+    if (hudMin) {
+      if (btn)    btn.style.display    = 'none';
+      if (counts) counts.style.display = 'none';
+      if (minBtn) { minBtn.textContent = '+'; minBtn.title = 'Expand HUD'; }
+      hud.style.padding = '4px 7px';
+      var ind = document.getElementById('tsv6-hud-ind');
+      if (!ind) {
+        ind = document.createElement('span');
+        ind.id = 'tsv6-hud-ind';
+        ind.textContent = 'TSV';
+        ind.style.cssText = 'font-size:10px;color:#aaa;cursor:pointer;user-select:none;';
+        ind.title = 'Expand HUD';
+        ind.addEventListener('click', function(e) {
+          e.stopPropagation();
+          hudMin = false;
+          sSet(HUD_MIN_STORE, '0');
+          applyHudMinState();
+        });
+        hud.insertBefore(ind, minBtn);
+      }
+      ind.style.display = '';
+    } else {
+      if (btn)    btn.style.display    = '';
+      if (counts) counts.style.display = '';
+      if (minBtn) { minBtn.textContent = '−'; minBtn.title = 'Minimise HUD'; }
+      hud.style.padding = '8px 12px';
+      var ind2 = document.getElementById('tsv6-hud-ind');
+      if (ind2) ind2.style.display = 'none';
+    }
   }
 
   function updateHudCounts(counts) {
     var el = document.getElementById('tsv6-hud-counts');
     if (!el) return;
 
+    if (hudMin)      { el.textContent = ''; el.style.display = 'none'; return; }
     if (!hudVisible) { el.textContent = ''; el.style.display = 'none'; return; }
     el.style.display = '';
 
@@ -375,7 +444,9 @@
     var sx, sy, sl, st, dragging = false;
 
     el.addEventListener('pointerdown', function (e) {
-      if (e.target.id === 'tsv6-hud-btn') return;
+      if (e.target.id === 'tsv6-hud-btn' ||
+          e.target.id === 'tsv6-hud-min' ||
+          e.target.id === 'tsv6-hud-ind') return;
       e.preventDefault();
       try { el.setPointerCapture(e.pointerId); } catch(ex) {}
       dragging = true;
@@ -702,8 +773,11 @@
 
     var allRules = [];
     for (var id in itemRules) {
-      var rules = itemRules[id];
-      if (!rules || !rules.length) continue;
+      if (id.indexOf('shop_') === 0) continue; // skip shop colour overrides
+      var _entry = itemRules[id];
+      if (!_entry) continue;
+      var rules = Array.isArray(_entry) ? _entry : (_entry.rules || []);
+      if (!rules.length) continue;
       for (var ri = 0; ri < rules.length; ri++) {
         allRules.push({ id: id, ri: ri, rule: rules[ri] });
       }
@@ -736,8 +810,12 @@
         del.title = 'Delete rule';
         del.addEventListener('click', function(e) {
           e.stopPropagation();
-          itemRules[entry.id].splice(entry.ri, 1);
-          if (!itemRules[entry.id].length) delete itemRules[entry.id];
+          var _target = itemRules[entry.id];
+          var _ruleArr = Array.isArray(_target) ? _target : (_target && _target.rules);
+          if (_ruleArr) {
+            _ruleArr.splice(entry.ri, 1);
+            if (!_ruleArr.length) delete itemRules[entry.id];
+          }
           saveRules();
           scan();
           // Re-render the rules section
@@ -814,10 +892,20 @@
   function openEditorForItem(itemId, itemName) {
     closeEditor();
 
-    var existing = itemRules[itemId] ? JSON.parse(JSON.stringify(itemRules[itemId])) : [];
-    // Ensure it's an array (legacy single-rule migration)
-    if (existing && !Array.isArray(existing)) existing = [existing];
-    var draft = existing.length ? existing : [];
+    var _raw = itemRules[itemId] ? JSON.parse(JSON.stringify(itemRules[itemId])) : null;
+    var draft;
+    if (!_raw) {
+      draft = [];
+    } else if (Array.isArray(_raw)) {
+      // Legacy: plain array of rule objects
+      draft = _raw;
+    } else if (_raw.rules && Array.isArray(_raw.rules)) {
+      // Current format: { name, rules: [...] }
+      draft = _raw.rules;
+    } else {
+      // Very old single-rule object
+      draft = [_raw];
+    }
 
     var ed = document.createElement('div');
     ed.id = 'tsv-editor';
@@ -1315,8 +1403,8 @@
     if (!ready) return;
 
     // Clear previous shop highlights
-    document.querySelectorAll('.tsv-shop-buy,.tsv-shop-sell-warn,.tsv-shop-sell-ok').forEach(function(el) {
-      el.classList.remove('tsv-shop-buy', 'tsv-shop-sell-warn', 'tsv-shop-sell-ok');
+    document.querySelectorAll('.tsv-shop-buy,.tsv-shop-sell-warn,.tsv-shop-sell-ok,.tsv-shop-sell-green,.tsv-shop-sell-yellow,.tsv-shop-sell-red').forEach(function(el) {
+      el.classList.remove('tsv-shop-buy', 'tsv-shop-sell-warn', 'tsv-shop-sell-ok', 'tsv-shop-sell-green', 'tsv-shop-sell-yellow', 'tsv-shop-sell-red');
     });
     document.querySelectorAll('.tsv-shop-badge,.tsv-badge-wrap').forEach(function(b) { b.remove(); });
 
@@ -1454,7 +1542,7 @@
     if (window.location.href.indexOf('shops.php') !== -1) return; // shop page uses scanShop()
 
     // Clear previous highlights and badges
-    var COLOR_NAMES = ['green','yellow','blue','orange','purple','red'];
+    var COLOR_NAMES = COLOR_KEYS.slice();
     var toRemove = [];
     for (var ci = 0; ci < COLOR_NAMES.length; ci++) {
       var els = document.querySelectorAll('.tsv-hl-' + COLOR_NAMES[ci]);
@@ -1466,7 +1554,8 @@
     document.querySelectorAll('.tsv-badge-wrap').forEach(function(el) { el.remove(); });
 
     var imgs   = document.querySelectorAll('img[src*="/images/items/"]');
-    var counts = { green:0, yellow:0, blue:0, orange:0, purple:0, red:0 };
+    var counts = {};
+    for (var ck = 0; ck < COLOR_KEYS.length; ck++) { counts[COLOR_KEYS[ck]] = 0; }
 
     for (var i = 0; i < imgs.length; i++) {
       var img = imgs[i];
@@ -1524,7 +1613,7 @@
       // ── Item rules (override all globals) ─────────────────────────────────
       var entry = itemRules[ruleId];
       if (entry) {
-        var rules = entry.rules || [];
+        var rules = Array.isArray(entry) ? entry : (entry.rules || []);
         for (var ri = 0; ri < rules.length; ri++) {
           var rule = rules[ri];
           var hit  = false, ref = 0;
@@ -1621,6 +1710,7 @@
     var _href = window.location.href;
     if (_href.indexOf('/item.php') !== -1) return;
     if (_href.indexOf('sid=crimes') !== -1) return;
+    if (_href.indexOf('sid=racing') !== -1) return;
 
     loadSettings();
     loadRules();
