@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         KB's Trader Helper Highlights
-// @namespace    https://greasyfork.org/scripts/kb-torn-under-sell-value
+// @namespace    https://greasyfork.org/en/scripts/568701-kb-s-trader-helper-highlights
 // @version      8.3.1
 // @description  Highlights bazaar/market/shop items for trading profit. NPC shops buy/sell analysis, per-item rules, draggable HUD.
 // @author       torn-local
